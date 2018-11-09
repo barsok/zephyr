@@ -50,32 +50,19 @@ struct nrfx_i2s_cfg {
 };
 
 struct direction_config {
+	s32_t state;
+	struct k_sem sem;
 	nrfx_i2s_config_t nrfx_config;
 	struct k_mem_slab *mem_slab;
 	size_t block_size;
 	s32_t timeout;
-	s32_t state;
 	struct i2s_config config_copy;
+	struct ring_buf mem_block_queue;
 };
 
 struct nrfx_i2s_data {
 	struct direction_config config_tx;
 	struct direction_config config_rx;
-};
-
-struct stream {
-	s32_t state;
-	struct k_sem sem;
-	u32_t dma_channel;
-	struct dma_config dma_cfg;
-	struct i2s_config cfg;
-	struct ring_buf mem_block_queue;
-	void *mem_block;
-	bool last_block;
-	bool master;
-	int (*stream_start)(struct stream *, struct device *dev);
-	void (*stream_disable)(struct stream *, struct device *dev);
-	void (*queue_drop)(struct stream *);
 };
 
 
@@ -103,7 +90,7 @@ void nrfx_i2s_fill_best_clock_settings(nrfx_i2s_config_t *config,
 }
 
 
-static int nrfx_i2s_config_for_dir_get(enum i2s_dir dir,
+static int nrfx_i2s_dir_config_get(enum i2s_dir dir,
 		struct direction_config **config)
 {
 	struct nrfx_i2s_data *const dev_data = DEV_DATA(dev);
@@ -129,7 +116,7 @@ int nrfx_i2s_configure_direction(struct device *dev, enum i2s_dir dir,
 	struct direction_config *dir_config;
 	int ret;
 
-	ret = nrfx_i2s_config_for_dir_get(dir, &dir_config);
+	ret = nrfx_i2s_dir_config_get(dir, &dir_config);
 	if (ret != 0) {
 		return ret;
 	}
@@ -207,6 +194,8 @@ int nrfx_i2s_configure_direction(struct device *dev, enum i2s_dir dir,
 		return -EINVAL;
 	}
 
+	/* at the moment I do not see a case with mono sound */
+	dir_config->nrfx_config.channels = NRF_I2S_CHANNELS_STEREO;
 
 	dir_config->state = I2S_STATE_READY;
 	return 0;
@@ -218,7 +207,7 @@ struct i2s_config *nrfx_i2s_config_get(struct device *dev, enum i2s_dir dir)
 	struct direction_config *dir_config;
 	int ret;
 
-	ret = nrfx_i2s_config_for_dir_get(dir, &dir_config);
+	ret = nrfx_i2s_dir_config_get(dir, &dir_config);
 	if (ret != 0) {
 		return NULL;
 	}
@@ -227,19 +216,148 @@ struct i2s_config *nrfx_i2s_config_get(struct device *dev, enum i2s_dir dir)
 }
 
 
-int (*nrfx_i2s_read)(struct device *dev, void **mem_block, size_t *size);
+int nrfx_i2s_read(struct device *dev, void **mem_block, size_t *size) {
+	struct nrfx_i2s_data *const dev_data = DEV_DATA(dev);
+	int ret;
+
+	if (dev_data->config_rx.state == I2S_STATE_NOT_READY) {
+		LOG_DBG("invalid state");
+		return -EIO;
+	}
+
+	if (dev_data->config_rx.state != I2S_STATE_ERROR) {
+		ret = k_sem_take(&dev_data->config_rx.sem, dev_data->config_rx.timeout);
+		if (ret < 0) {
+			return ret;
+		}
+	}
+
+	/* Get data from the beginning of RX queue */
+	ret = queue_get(&dev_data->config_rx.mem_block_queue, mem_block, size);
+	if (ret < 0) {
+		return -EIO;
+	}
+
+	return 0;
+}
+
+
+int nrfx_i2s_write(struct device *dev, void *mem_block, size_t size) {
+	struct nrfx_i2s_data *const dev_data = DEV_DATA(dev);
+	int ret;
+
+	if (dev_data->config_tx.state != I2S_STATE_RUNNING &&
+	    dev_data->config_tx.state != I2S_STATE_READY) {
+		LOG_DBG("invalid state");
+		return -EIO;
+	}
+
+	ret = k_sem_take(&dev_data->config_tx.sem, dev_data->config_tx.timeout);
+	if (ret < 0) {
+		return ret;
+	}
+
+	/* Add data to the end of the TX queue */
+	queue_put(&dev_data->config_tx.mem_block_queue, mem_block, size);
+
+	return 0;
+}
+
+
+static int nrfx_i2s_trigger(struct device *dev, enum i2s_dir dir,
+			     enum i2s_trigger_cmd cmd)
+{
+	struct nrfx_i2s_data *const dev_data = DEV_DATA(dev);
+	struct direction_config *dir_config;
+	unsigned int key;
+	int ret;
+
+	ret = nrfx_i2s_dir_config_get(dir, &dir_config);
+	if (ret != 0) {
+		return ret;
+	}
+
+	switch (cmd) {
+	case I2S_TRIGGER_START:
+		if (dir_config->state != I2S_STATE_READY) {
+			LOG_ERR("START trigger: invalid state %d",
+				    dir_config->state);
+			return -EIO;
+		}
+
+		__ASSERT_NO_MSG(stream->mem_block == NULL);
+
+		ret = dir_config->stream_start(dir_config, dev);
+		if (ret < 0) {
+			LOG_ERR("START trigger failed %d", ret);
+			return ret;
+		}
+
+		dir_config->state = I2S_STATE_RUNNING;
+		dir_config->last_block = false;
+		break;
+
+	case I2S_TRIGGER_STOP:
+		key = irq_lock();
+		if (dir_config->state != I2S_STATE_RUNNING) {
+			irq_unlock(key);
+			LOG_ERR("STOP trigger: invalid state");
+			return -EIO;
+		}
+		irq_unlock(key);
+		dir_config->stream_disable(dir_config, dev);
+		dir_config->queue_drop(dir_config);
+		dir_config->state = I2S_STATE_READY;
+		dir_config->last_block = true;
+		break;
+
+	case I2S_TRIGGER_DRAIN:
+		key = irq_lock();
+		if (dir_config->state != I2S_STATE_RUNNING) {
+			irq_unlock(key);
+			LOG_ERR("DRAIN trigger: invalid state");
+			return -EIO;
+		}
+		dir_config->stream_disable(dir_config, dev);
+		dir_config->queue_drop(dir_config);
+		dir_config->state = I2S_STATE_READY;
+		irq_unlock(key);
+		break;
+
+	case I2S_TRIGGER_DROP:
+		if (stream->state == I2S_STATE_NOT_READY) {
+			LOG_ERR("DROP trigger: invalid state");
+			return -EIO;
+		}
+		dir_config->stream_disable(dir_config, dev);
+		dir_config->queue_drop(dir_config);
+		dir_config->state = I2S_STATE_READY;
+		break;
+
+	case I2S_TRIGGER_PREPARE:
+		if (dir_config->state != I2S_STATE_ERROR) {
+			LOG_ERR("PREPARE trigger: invalid state");
+			return -EIO;
+		}
+		dir_config->state = I2S_STATE_READY;
+		dir_config->queue_drop(dir_config);
+		break;
+
+	default:
+		LOG_ERR("Unsupported trigger command");
+		return -EINVAL;
+	}
+
+	return 0;
+}
 
 
 
-/**
- * @cond INTERNAL_HIDDEN
- *
- * For internal use only, skip these in public documentation.
- */
-struct i2s_driver_api {
-	int (*read)(struct device *dev, void **mem_block, size_t *size);
-	int (*write)(struct device *dev, void *mem_block, size_t size);
-	int (*trigger)(struct device *dev, enum i2s_dir dir,
-			enum i2s_trigger_cmd cmd);
+static const struct i2s_driver_api i2s_stm32_driver_api = {
+	.configure = nrfx_i2s_configure_direction,
+	.read = nrfx_i2s_read,
+	.write = nrfx_i2s_write,
+	.trigger = nrfx_i2s_trigger,
 };
+
 
