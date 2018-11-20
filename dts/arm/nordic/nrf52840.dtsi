@@ -151,7 +151,7 @@
 			label = "SPI_2";
 		};
 
-		spi3: spi@4002B000 {
+		spi3: spi@4002b000 {
 			compatible = "nordic,nrf-spi";
 			#address-cells = <1>;
 			#size-cells = <0>;
@@ -173,6 +173,13 @@
 			num-isoout-endpoints = <1>;
 			status = "disabled";
 			label = "USBD";
+		};
+
+		i2s0: i2s@40025000 {
+			compatible = "nordic,nrf-i2s";
+			reg = <0x40025000 0x1000>;
+			interrupts = <37 1>;
+			label = "I2S_0";
 		};
 
 		wdt: watchdog@40010000 {
@@ -197,6 +204,10 @@
 				label = "CRYTOCELL310";
 			};
 		};
+	};
+
+	aliases {
+		dt-i2s0 = &i2s0;
 	};
 };
 

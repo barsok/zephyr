@@ -162,6 +162,15 @@
 	miso-pin = <20>;
 };
 
+&i2s0 {
+	status = "ok";
+        mck-pin = <27>;
+        sck-pin = <28>;
+        lrck-pin = <29>;
+        sdout-pin = <30>;
+        sdin-pin = <31>;
+};
+
 &flash0 {
 	/*
 	 * For more information, see:
