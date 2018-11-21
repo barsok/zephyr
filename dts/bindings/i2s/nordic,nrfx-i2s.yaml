@@ -1,0 +1,56 @@
+---
+title: Nordic I2S
+version: 0.1
+
+description: >
+    This binding gives a base representation of the Nordic I2S
+
+inherits:
+    !include i2s.yaml
+
+properties:
+    compatible:
+      constraint: "nordic,nrf-i2s"
+
+    reg:
+      type: array
+      description: mmio register space
+      generation: define
+      category: required
+
+    interrupts:
+      type: array
+      category: required
+      description: required interrupts
+      generation: define
+
+    mck-pin:
+      type: int
+      description: MCK pin
+      generation: define
+      category: required
+
+    sck-pin:
+      type: int
+      description: SCK pin
+      generation: define
+      category: required
+
+    lrck-pin:
+      type: int
+      description: LRCK pin
+      generation: define
+      category: optional
+
+    sdout-pin:
+      type: int
+      description: SDOUT pin
+      generation: define
+      category: optional
+
+    sdin-pin:
+      type: int
+      description: SDIN pin
+      generation: define
+      category: optional
+...

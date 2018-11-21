@@ -42,6 +42,8 @@
 
 #define LOG_ERR(...)
 #define LOG_DBG(...)
+#define LOG_INF(...)
+#define STATIC
 
 #ifndef uint8_t
 #define uint8_t unsigned char
@@ -81,6 +83,7 @@ struct direction_config {
 	s32_t timeout;
 	struct i2s_config api_config_copy;
 	struct queue mem_block_queue;
+	bool last_block;
 	int (*start)(struct direction_config *, struct device *dev);
 	void (*stop)(struct direction_config *, struct device *dev);
 	void (*drop)(struct direction_config *);
@@ -118,7 +121,7 @@ void queue_init(struct queue *queue, uint8_t len)
 }
 
 
-static int queue_add(struct queue *queue, void *data, uint32_t size)
+STATIC int queue_add(struct queue *queue, void *data, uint32_t size)
 {
 	uint8_t new_write_idx;
 
@@ -139,7 +142,7 @@ static int queue_add(struct queue *queue, void *data, uint32_t size)
 }
 
 
-static int queue_fetch(struct queue *queue, void **data, uint32_t *size)
+STATIC int queue_fetch(struct queue *queue, void **data, uint32_t *size)
 {
 	uint8_t new_read_idx;
 
@@ -175,7 +178,7 @@ void nrfx_i2s_fill_best_clock_settings(nrfx_i2s_config_t *config,
 }
 
 
-static int nrfx_i2s_dir_config_get(enum i2s_dir dir,
+STATIC int nrfx_i2s_dir_config_get(enum i2s_dir dir,
 		struct zephyr_i2s_data *const dev_data,
 		struct direction_config **direction_config)
 {
@@ -378,7 +381,7 @@ int nrfx_i2s_write(struct device *dev, void *mem_block, size_t size) {
 }
 
 
-static int nrfx_i2s_trigger(struct device *dev, enum i2s_dir dir,
+STATIC int nrfx_i2s_trigger(struct device *dev, enum i2s_dir dir,
 			     enum i2s_trigger_cmd cmd)
 {
 	struct zephyr_i2s_data *const dev_data = DEV_DATA(dev);
@@ -465,7 +468,7 @@ static int nrfx_i2s_trigger(struct device *dev, enum i2s_dir dir,
 
 
 
-static const struct i2s_driver_api i2s_stm32_driver_api = {
+STATIC const struct i2s_driver_api i2s_stm32_driver_api = {
 	.configure = nrfx_i2s_api_configure,
 	.read = nrfx_i2s_read,
 	.write = nrfx_i2s_write,
@@ -652,15 +655,16 @@ struct nrfx_agent_state_actions nrfx_agent_state_stopped = {
 
 /* state running */
 
-int running_nrfx_agent_add_direction(uint32_t *buf,
-		enum i2s_dir dir,
+int running_nrfx_agent_add_direction(enum i2s_dir dir, uint32_t *buf,
 		int32_t buffer_size) {
 	nrfx_agent_set_new_state(NRFX_DRIVER_STOPPED);
 	nrfx_i2s_stop();
-	return nrfx_agent_add_direction(buf, dir, buffer_size);
+	return nrfx_agent_add_direction(dir, buf, buffer_size);
 }
 
 int running_nrfx_agent_remove_direction(enum i2s_dir dir) {
+	nrfx_err_t status;
+
 	nrfx_i2s_stop();
 
 	switch (dir) {
@@ -681,18 +685,22 @@ int running_nrfx_agent_remove_direction(enum i2s_dir dir) {
 		return 0;
 	}
 	else {
-		return stopped_nrfx_agent_add_direction(&nrfx_agent_buffers,
-				dir, nrfx_agent_buffer_size);
+		status = nrfx_i2s_start(&nrfx_agent_buffers, nrfx_agent_buffer_size, 0);
+		if (status != NRFX_SUCCESS) {
+			return -EINVAL;
+		}
+
+		nrfx_agent_set_new_state(NRFX_DRIVER_RUNNING);
 	}
 }
 
-int not_allowed_nrfx_agent_configure(nrfx_i2s_config_t const *config) {
+int not_allowed_nrfx_agent_configure(nrfx_i2s_config_t const *config,
+		struct zephyr_i2s_data const *zephyr_i2s_data) {
 	return -EINVAL;
 }
 
 void running_data_handler(nrfx_i2s_buffers_t const *p_released,
 		uint32_t status) {
-	struct direction_config *direction_config;
 	nrfx_i2s_buffers_t p_new_buffers;
 
 	if ((status & NRFX_I2S_STATUS_NEXT_BUFFERS_NEEDED)
@@ -737,7 +745,7 @@ void nrfx_agent_set_new_state(enum nrfx_agent_states new_state) {
  *
  */
 #if 0
-static void rx_data_handler(struct direction_config *direction_config,
+STATIC void rx_data_handler(struct direction_config *direction_config,
 		nrfx_i2s_buffers_t const *p_released, uint32_t status,
 		nrfx_i2s_buffers_t *p_released) {
 
@@ -781,29 +789,26 @@ rx_disable:
 }
 #endif
 
-static void dma_tx_callback(struct direction_config *direction_tx,
+
+STATIC void dma_tx_callback(struct direction_config *direction_tx,
 		nrfx_i2s_buffers_t const *p_released, uint32_t status,
 		nrfx_i2s_buffers_t *p_new_buffers)
 {
-	struct device *dev = get_dev_from_tx_dma_channel(channel);
-	const struct i2s_stm32_cfg *cfg = DEV_CFG(dev);
-	struct i2s_stm32_data *const dev_data = DEV_DATA(dev);
-	struct stream *stream = &dev_data->tx;
 	size_t mem_block_size;
 	uint32_t *mem_block;
 	int ret;
 
-	k_mem_slab_free(direction_tx->mem_slab, p_released->p_tx_buffer);
+	k_mem_slab_free(direction_tx->mem_slab, (void**)(&p_released->p_tx_buffer));
 
 	/* Stop transmission if there was an error */
-	if (direction_tx->state == I2S_STATE_ERROR) {
+	if (direction_tx->api_state == I2S_STATE_ERROR) {
 		LOG_ERR("TX error detected");
 		goto tx_disable;
 	}
 
 	/* Stop transmission if we were requested */
 	if (direction_tx->last_block) {
-		direction_tx->state = I2S_STATE_READY;
+		direction_tx->api_state = I2S_STATE_READY;
 		goto tx_disable;
 	}
 
@@ -811,18 +816,18 @@ static void dma_tx_callback(struct direction_config *direction_tx,
 
 	if (mem_block_size !=
 			CONTAINER_OF(direction_tx, struct zephyr_i2s_data, direction_tx)->block_size) {
-		direction_tx->state = I2S_STATE_ERROR;
+		direction_tx->api_state = I2S_STATE_ERROR;
 		goto tx_disable;
 	}
 
 	/* Prepare to send the next data block */
-	ret = queue_fetch(&direction_tx->mem_block_queue, &mem_block,
+	ret = queue_fetch(&direction_tx->mem_block_queue, (void**)&mem_block,
 			&mem_block_size);
 	if (ret < 0) {
-		if (direction_tx->state == I2S_STATE_STOPPING) {
-			direction_tx->state = I2S_STATE_READY;
+		if (direction_tx->api_state == I2S_STATE_STOPPING) {
+			direction_tx->api_state = I2S_STATE_READY;
 		} else {
-			direction_tx->state = I2S_STATE_ERROR;
+			direction_tx->api_state = I2S_STATE_ERROR;
 		}
 		goto tx_disable;
 	}
@@ -833,19 +838,17 @@ static void dma_tx_callback(struct direction_config *direction_tx,
 	return;
 
 tx_disable:
-	tx_stream_disable(direction_tx, dev);
+	return;
 }
 
 
-static int nrfx_i2s_initialize(struct device *dev)
+STATIC int nrfx_i2s_initialize(struct device *dev)
 {
-	const struct zephyr_i2s_cfg *cfg = DEV_CFG(dev);
 	struct zephyr_i2s_data *const dev_data = DEV_DATA(dev);
-	int ret, i;
 
-	k_sem_init(&dev_data->direction_rx.sem, 0, CONFIG_I2S_STM32_RX_BLOCK_COUNT);
-	k_sem_init(&dev_data->direction_tx.sem, CONFIG_I2S_STM32_TX_BLOCK_COUNT,
-		   CONFIG_I2S_STM32_TX_BLOCK_COUNT);
+	k_sem_init(&dev_data->direction_rx.sem, 0, CONFIG_NRFX_I2S_RX_BLOCK_COUNT);
+	k_sem_init(&dev_data->direction_tx.sem, CONFIG_NRFX_I2S_TX_BLOCK_COUNT,
+			CONFIG_NRFX_I2S_TX_BLOCK_COUNT);
 
 	nrfx_agent_init();
 
@@ -855,7 +858,7 @@ static int nrfx_i2s_initialize(struct device *dev)
 }
 
 #if 0
-static int rx_stream_start(struct stream *stream, struct device *dev)
+STATIC int rx_stream_start(struct stream *stream, struct device *dev)
 {
 	const struct i2s_stm32_cfg *cfg = DEV_CFG(dev);
 	struct i2s_stm32_data *const dev_data = DEV_DATA(dev);
@@ -895,7 +898,7 @@ static int rx_stream_start(struct stream *stream, struct device *dev)
 }
 #endif
 
-static int tx_direction_start(struct direction_config const *direction_tx) {
+STATIC int tx_direction_start(struct direction_config const *direction_tx) {
 	uint32_t *mem_block;
 	size_t mem_block_size;
 	int ret;
@@ -913,7 +916,7 @@ static int tx_direction_start(struct direction_config const *direction_tx) {
 }
 
 #if 0
-static void rx_stream_disable(struct stream *stream, struct device *dev)
+STATIC void rx_stream_disable(struct stream *stream, struct device *dev)
 {
 	const struct i2s_stm32_cfg *cfg = DEV_CFG(dev);
 	struct i2s_stm32_data *const dev_data = DEV_DATA(dev);
@@ -933,7 +936,7 @@ static void rx_stream_disable(struct stream *stream, struct device *dev)
 	active_dma_rx_channel[stream->dma_channel] = NULL;
 }
 
-static void tx_stream_disable(struct stream *stream, struct device *dev)
+STATIC void tx_stream_disable(struct stream *stream, struct device *dev)
 {
 	const struct i2s_stm32_cfg *cfg = DEV_CFG(dev);
 	struct i2s_stm32_data *const dev_data = DEV_DATA(dev);
@@ -953,7 +956,7 @@ static void tx_stream_disable(struct stream *stream, struct device *dev)
 	active_dma_tx_channel[stream->dma_channel] = NULL;
 }
 
-static void rx_queue_drop(struct stream *stream)
+STATIC void rx_queue_drop(struct stream *stream)
 {
 	size_t size;
 	void *mem_block;
@@ -965,7 +968,7 @@ static void rx_queue_drop(struct stream *stream)
 	k_sem_reset(&stream->sem);
 }
 
-static void tx_queue_drop(struct stream *stream)
+STATIC void tx_queue_drop(struct stream *stream)
 {
 	size_t size;
 	void *mem_block;
@@ -983,13 +986,13 @@ static void tx_queue_drop(struct stream *stream)
 
 #endif
 
+#ifdef CONFIG_NRFX_I2S
 
-#ifdef CONFIG_I2S_NRFX
-static struct device DEVICE_NAME_GET(i2s0);
+STATIC struct device DEVICE_NAME_GET(i2s0);
 
-static void i2s_stm32_irq_config_func_1(struct device *dev);
+STATIC void i2s_stm32_irq_config_func_1(struct device *dev);
 
-static const struct zephyr_i2s_cfg zephyr_i2s_cfg_0 = {
+STATIC const struct zephyr_i2s_cfg zephyr_i2s_cfg_0 = {
 		.sck_pin = DT_I2S0_SCK_PIN,
 		.lrck_pin =  DT_I2S0_LRCK_PIN,
 		.mck_pin = DT_I2S0_MCK_PIN,
@@ -997,57 +1000,13 @@ static const struct zephyr_i2s_cfg zephyr_i2s_cfg_0 = {
 		.sdin_pin = DT_I2S0_SDIN_PIN,
 };
 
-struct queue_item rx_1_ring_buf[CONFIG_I2S_STM32_RX_BLOCK_COUNT + 1];
-struct queue_item tx_1_ring_buf[CONFIG_I2S_STM32_TX_BLOCK_COUNT + 1];
+struct zephyr_i2s_data zephyr_i2s_data_0;
 
-static struct i2s_stm32_data i2s_stm32_data_1 = {
-	.dma_name = I2S1_DMA_NAME,
-	.rx = {
-		.dma_channel = I2S1_DMA_CHAN_RX,
-		.dma_cfg = {
-			.block_count = 1,
-			.dma_slot = I2S1_DMA_SLOT_RX,
-			.channel_direction = PERIPHERAL_TO_MEMORY,
-			.source_data_size = 1,  /* 16bit default */
-			.dest_data_size = 1,    /* 16bit default */
-			.source_burst_length = 0, /* SINGLE transfer */
-			.dest_burst_length = 1,
-			.dma_callback = dma_rx_callback,
-		},
-		.stream_start = rx_stream_start,
-		.stream_disable = rx_stream_disable,
-		.queue_drop = rx_queue_drop,
-		.mem_block_queue.buf = rx_1_ring_buf,
-		.mem_block_queue.len = ARRAY_SIZE(rx_1_ring_buf),
-	},
-	.tx = {
-		.dma_channel = I2S1_DMA_CHAN_TX,
-		.dma_cfg = {
-			.block_count = 1,
-			.dma_slot = I2S1_DMA_SLOT_TX,
-			.channel_direction = MEMORY_TO_PERIPHERAL,
-			.source_data_size = 1,  /* 16bit default */
-			.dest_data_size = 1,    /* 16bit default */
-			.source_burst_length = 1,
-			.dest_burst_length = 0, /* SINGLE transfer */
-			.dma_callback = dma_tx_callback,
-		},
-		.stream_start = tx_stream_start,
-		.stream_disable = tx_stream_disable,
-		.queue_drop = tx_queue_drop,
-		.mem_block_queue.buf = tx_1_ring_buf,
-		.mem_block_queue.len = ARRAY_SIZE(tx_1_ring_buf),
-	},
-};
-DEVICE_AND_API_INIT(i2s_stm32_1, CONFIG_I2S_1_NAME, &i2s_stm32_initialize,
-		    &i2s_stm32_data_1, &i2s_stm32_config_1, POST_KERNEL,
+struct queue_item rx_1_ring_buf[CONFIG_NRFX_I2S_RX_BLOCK_COUNT + 1];
+struct queue_item tx_1_ring_buf[CONFIG_NRFX_I2S_TX_BLOCK_COUNT + 1];
+
+DEVICE_AND_API_INIT(i2s_0, DT_I2S0_LABEL, &nrfx_i2s_initialize,
+		    &zephyr_i2s_data_0, &zephyr_i2s_cfg_0, POST_KERNEL,
 		    CONFIG_I2S_INIT_PRIORITY, &i2s_stm32_driver_api);
-
-static void i2s_stm32_irq_config_func_1(struct device *dev)
-{
-	IRQ_CONNECT(CONFIG_I2S_1_IRQ, CONFIG_I2S_1_IRQ_PRI, i2s_stm32_isr,
-		    DEVICE_GET(i2s_stm32_1), 0);
-	irq_enable(CONFIG_I2S_1_IRQ);
-}
 
 #endif /* CONFIG_I2S_1 */

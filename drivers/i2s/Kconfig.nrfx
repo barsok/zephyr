@@ -5,22 +5,22 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-menuconfig I2S_NRFX
+menuconfig NRFX_I2S
 	bool "NRFX I2S controller driver"
 	depends on I2S && HAS_HW_NRF_I2S
 	default n
 	help
 	  Enable nrfx I2S support for Nordic CPUs
 
-if I2S_NRFX
+if NRFX_I2S
 
-config I2S_NRFX_RX_BLOCK_COUNT
+config NRFX_I2S_RX_BLOCK_COUNT
 	int "RX queue length"
 	default 4
 
-config I2S_NRFX_TX_BLOCK_COUNT
+config NRFX_I2S_TX_BLOCK_COUNT
 	int "TX queue length"
 	default 4
 
-endif # I2S_NRFX
+endif # NRFX_I2S
 
