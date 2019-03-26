@@ -67,21 +67,30 @@
 
 
 
+#define AUDIO_IN_TERM_CHCONF_LEFT_FRONT         (1u << 0)  /**< Channel config bit LEFT_FRONT      */
+#define AUDIO_IN_TERM_CHCONF_RIGHT_FRONT        (1u << 1)  /**< Channel config bit RIGHT_FRONT     */
+#define AUDIO_IN_TERM_CHCONF_CENTER_FRONT       (1u << 2)  /**< Channel config bit CENTER_FRONT    */
+#define AUDIO_IN_TERM_CHCONF_LOW_FREQ_ENH       (1u << 3)  /**< Channel config bit LOW_FREQ_ENH    */
+#define AUDIO_IN_TERM_CHCONF_LEFT_SURROUND      (1u << 4)  /**< Channel config bit LEFT_SURROUND   */
+#define AUDIO_IN_TERM_CHCONF_RIGHT_SURROUND     (1u << 5)  /**< Channel config bit RIGHT_SURROUND  */
+#define AUDIO_IN_TERM_CHCONF_LEFT_OF_CENTER     (1u << 6)  /**< Channel config bit LEFT_OF_CENTER  */
+#define AUDIO_IN_TERM_CHCONF_RIGHT_OF_CENTER    (1u << 7)  /**< Channel config bit RIGHT_OF_CENTER */
+#define AUDIO_IN_TERM_CHCONF_SURROUND           (1u << 8)  /**< Channel config bit SURROUND        */
+#define AUDIO_IN_TERM_CHCONF_SIDE_LEFT          (1u << 9)  /**< Channel config bit SIDE_LEFT       */
+#define AUDIO_IN_TERM_CHCONF_SIDE_RIGHT         (1u << 10) /**< Channel config bit SIDE_RIGHT      */
+#define AUDIO_IN_TERM_CHCONF_TOP                (1u << 11) /**< Channel config bit TOP             */
 
 
 
 
 
-
-
-
-
+/*
 struct audio_subclass_desc
 {
    size_t                size;
    uint8_t               type;
    uint8_t const * const p_data;
-};
+};*/
 
 
 
