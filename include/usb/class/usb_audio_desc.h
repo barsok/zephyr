@@ -253,7 +253,7 @@ struct audio_as_format_type_iii_desc_##name {		\
 		.wTerminalType = sys_cpu_to_le16(0x0101),		\
 		.bAssocTerminal = 0,					\
 		.bNrChannels = 2, 				\
-		.wChannelConfig = sys_cpu_to_le16(0x0003),	\
+		.wChannelConfig = sys_cpu_to_le16(0x0003),	/* left, right */\
 		.iChannelNames = 0,					\
 		.iTerminal = 0						\
 	}
@@ -278,7 +278,7 @@ struct audio_as_format_type_iii_desc_##name {		\
 		.bUnitID = unit_id,					\
 		.bSourceID = source_id,					\
 		.bControlSize = 1,					\
-		.bmaControls = { 0x01, 0x01, 0x01 },			\
+		.bmaControls = { 0x01, 0x00, 0x01 },			\
 		.iFeature = 0						\
 	}
 

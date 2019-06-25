@@ -157,9 +157,9 @@ config USB_DFU_DEFAULT_POLLTIMEOUT
 
 config USB_AUDIO
 	bool "USB Audio Device Class Driver"
-	select USB_COMPOSITE_DEVICE
+#	select USB_COMPOSITE_DEVICE
 	help
 	  USB audio device class driver
 
-endif # CONFIG_USB_DEVICE_STACK
+
 

@@ -25,7 +25,7 @@
 #include <nrfx_usbd.h>
 
 
-#define LOG_LEVEL CONFIG_USB_DRIVER_LOG_LEVEL
+#define LOG_LEVEL 4
 #include <logging/log.h>
 LOG_MODULE_REGISTER(usb_nrfx);
 
@@ -1121,11 +1121,14 @@ static void usbd_event_transfer_data(nrfx_usbd_evt_t const *const p_event)
 /**
  * @brief nRFx USBD driver event handler function.
  */
+extern void brtLogAdd(int);
 static void usbd_event_handler(nrfx_usbd_evt_t const *const p_event)
 {
 	struct nrf_usbd_ep_ctx *ep_ctx;
 	struct usbd_event evt = {0};
 	bool put_evt = false;
+
+	brtLogAdd(0xF00000 | p_event->type);
 
 	switch (p_event->type) {
 	case NRFX_USBD_EVT_SUSPEND:
@@ -1156,6 +1159,12 @@ static void usbd_event_handler(nrfx_usbd_evt_t const *const p_event)
 
 	case NRFX_USBD_EVT_EPTRANSFER:
 		ep_ctx = endpoint_ctx(p_event->data.eptransfer.ep);
+		LOG_ERR(">>> %x %x %x", ep_ctx->cfg.addr, ep_ctx->cfg.en, ep_ctx->cfg.type);
+		/*if (ep_ctx->cfg.en != 1)
+		{
+			brtLogAdd(0xEE0001);
+			break;
+		}*/
 		switch (ep_ctx->cfg.type) {
 		case USB_DC_EP_CONTROL:
 			usbd_event_transfer_ctrl(p_event);
@@ -1468,6 +1477,7 @@ int usb_dc_ep_configure(const struct usb_dc_ep_cfg_data *const ep_cfg)
 	ep_ctx->cfg.addr = ep_cfg->ep_addr;
 	ep_ctx->cfg.type = ep_cfg->ep_type;
 	ep_ctx->cfg.max_sz = ep_cfg->ep_mps;
+	LOG_ERR("^^^ ep cfg: %d %d %d", ep_cfg->ep_addr, ep_cfg->ep_type, ep_cfg->ep_mps);
 
 	if ((ep_cfg->ep_mps & (ep_cfg->ep_mps - 1)) != 0U) {
 		LOG_ERR("EP max packet size must be a power of 2");
@@ -1588,6 +1598,19 @@ int usb_dc_ep_enable(const u8_t ep)
 
 	return 0;
 }
+
+extern void usb_log_status(void)
+{
+	LOG_WRN("EPOUTEN 0x%08x", NRF_USBD->EPOUTEN);
+	LOG_WRN("SIZE.ISOOUT 0x%08x", NRF_USBD->SIZE.ISOOUT);
+	struct nrf_usbd_ep_ctx *ep_ctx;
+	ep_ctx = endpoint_ctx(NRFX_USBD_EPOUT8);
+	LOG_WRN("addr 0x%08x", ep_ctx->cfg.addr);
+	LOG_WRN("cb   0x%08x", (int)ep_ctx->cfg.cb);
+	LOG_WRN("en   0x%08x", ep_ctx->cfg.en);
+	LOG_WRN("type 0x%08x", ep_ctx->cfg.type);
+}
+
 
 int usb_dc_ep_disable(const u8_t ep)
 {

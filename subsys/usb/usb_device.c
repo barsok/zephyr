@@ -70,7 +70,7 @@
 #include <usb/usb_common.h>
 #include <usb_descriptor.h>
 
-#define LOG_LEVEL CONFIG_USB_DEVICE_LOG_LEVEL
+#define LOG_LEVEL 4
 #include <logging/log.h>
 LOG_MODULE_REGISTER(usb_device);
 
@@ -207,6 +207,7 @@ static bool usb_handle_request(struct usb_setup_packet *setup,
 {
 	u32_t type = REQTYPE_GET_TYPE(setup->bmRequestType);
 	usb_request_handler handler = usb_dev.req_handlers[type];
+	int retVal;
 
 	LOG_DBG("** %d **", type);
 
@@ -220,8 +221,11 @@ static bool usb_handle_request(struct usb_setup_packet *setup,
 		return false;
 	}
 
-	if ((*handler)(setup, len, data) < 0) {
+	LOG_DBG("Calling handler at 0x%8x", (uint32_t)handler);
+	retVal = (*handler)(setup, len, data);
+	if (retVal < 0) {
 		LOG_DBG("Handler Error %d", type);
+		LOG_DBG("Handler Error Number %d", retVal);
 		usb_print_setup(setup);
 		return false;
 	}
@@ -485,6 +489,9 @@ static bool usb_get_descriptor(u16_t type_index, u16_t lang_id,
 static bool set_endpoint(const struct usb_ep_descriptor *ep_desc)
 {
 	struct usb_dc_ep_cfg_data ep_cfg;
+	int reason;
+
+	LOG_ERR("SETPOINT!");
 
 	ep_cfg.ep_addr = ep_desc->bEndpointAddress;
 	ep_cfg.ep_mps = sys_le16_to_cpu(ep_desc->wMaxPacketSize);
@@ -502,8 +509,9 @@ static bool set_endpoint(const struct usb_ep_descriptor *ep_desc)
 		LOG_WRN("Failed to configure endpoint %x", ep_cfg.ep_addr);
 	}
 
-	if (usb_dc_ep_enable(ep_cfg.ep_addr) < 0) {
-		LOG_WRN("Failed to enable endpoint %x", ep_cfg.ep_addr);
+	reason = usb_dc_ep_enable(ep_cfg.ep_addr);
+	if (reason < 0) {
+		LOG_WRN("Failed to enable endpoint %x reason %d", ep_cfg.ep_addr, reason);
 	}
 
 	usb_dev.configured = true;
@@ -602,20 +610,23 @@ static bool usb_set_interface(u8_t iface, u8_t alt_setting)
 			/* remember current alternate setting */
 			cur_alt_setting = p[INTF_DESC_bAlternateSetting];
 			cur_iface = p[INTF_DESC_bInterfaceNumber];
+			LOG_DBG("INTERFACE found %d, %d", cur_alt_setting, cur_iface);
 
 			if (cur_iface == iface &&
 			    cur_alt_setting == alt_setting) {
 				if_desc = (void *)p;
+				LOG_DBG("INTERFACE iface_num %u alt_set %u", iface, alt_setting);
 			}
 
-			LOG_DBG("iface_num %u alt_set %u", iface, alt_setting);
 			break;
 		case DESC_ENDPOINT:
+			LOG_DBG("ENDPOINT found");
 			if ((cur_iface != iface) ||
 			    (cur_alt_setting != alt_setting)) {
 				break;
 			}
-
+			LOG_DBG("ENDPOINT alt_setting");
+			usb_dc_ep_disable(((struct usb_ep_descriptor *)p)->bEndpointAddress);
 			found = set_endpoint((struct usb_ep_descriptor *)p);
 			break;
 		default:
@@ -627,9 +638,11 @@ static bool usb_set_interface(u8_t iface, u8_t alt_setting)
 	}
 
 	if (usb_dev.status_callback) {
+		LOG_DBG("Calling callback: 0x%08x", (int)usb_dev.status_callback);
 		usb_dev.status_callback(USB_DC_INTERFACE, if_desc);
 	}
 
+	LOG_DBG("Found: %d", (int)found);
 	return found;
 }
 
@@ -769,6 +782,7 @@ static bool usb_handle_std_interface_req(struct usb_setup_packet *setup,
 		/* there is only one interface, return n-1 (= 0) */
 		data[0] = 0U;
 		*len = 1;
+		LOG_DBG("REQ_GET_INTERFACE. Reported ONE interface");
 		break;
 
 	case REQ_SET_INTERFACE:
@@ -1424,13 +1438,21 @@ static int class_handler(struct usb_setup_packet *pSetup,
 			continue;
 		}
 
+		LOG_DBG("class handler: %08x", (uint32_t)iface->class_handler);
+
 		if ((iface->class_handler) &&
 		    (if_descr->bInterfaceNumber ==
 		     (sys_le16_to_cpu(pSetup->wIndex) & 0xFF))) {
+			LOG_DBG("Do actual call");
 			return iface->class_handler(pSetup, len, data);
 		}
+		else
+		{
+			LOG_DBG("No joy. 0x%x != 0x%x", if_descr->bInterfaceNumber,
+					sys_le16_to_cpu(pSetup->wIndex));
+		}
 	}
-
+	LOG_DBG("Handler not found!");
 	return -ENOTSUP;
 }
 

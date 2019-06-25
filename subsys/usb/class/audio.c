@@ -26,6 +26,8 @@ struct usb_audio_dev_data_t {
 	void *cb_data;
 	struct k_work cb_work;
 
+	uint8_t mixerCurrent;
+
 	struct usb_dev_data common;
 
 	u8_t interface_data[CONFIG_USB_AUDIO_MAX_PAYLOAD_SIZE];
@@ -34,22 +36,22 @@ struct usb_audio_dev_data_t {
 static sys_slist_t usb_audio_data_devlist;
 
 
-#define DEFINE_AUDIO_HEADPHONES_DESCR(x, stream_ep_addr)\
-	DEFINE_AUDIO_HEADPHONES_DESCR_TYPES(x, 1)			\
-	USBD_CLASS_DESCR_DEFINE(primary, x)				\
-	struct usb_audio_config_##x usb_audio_desc_##x = {		\
-	.if_control = INITIALIZER_IF_CONTROL,				\
+#define DEFINE_AUDIO_HEADPHONES_DESCR(name, stream_ep_addr)\
+	DEFINE_AUDIO_HEADPHONES_DESCR_TYPES(name, 1)			\
+	USBD_CLASS_DESCR_DEFINE(primary, name)				\
+	struct usb_audio_config_##name usb_audio_desc_##name = {		\
+			.if_control = INITIALIZER_IF_CONTROL,				\
 	.control_desc = {						\
-		.header = INITIALIZER_IFC_HEADER(x),			\
+		.header = INITIALIZER_IFC_HEADER(name),			\
 		.input_terminal = INITIALIZER_IFC_INPUT_TERMINAL(1),	\
-		.feature = INITIALIZER_IFC_FEATURE_UNIT(x, 2, 1) ,	\
+		.feature = INITIALIZER_IFC_FEATURE_UNIT(name, 2, 1) ,	\
 		.output_terminal = INITIALIZER_IFC_OUTPUT_TERMINAL(3, 2),\
 	},								\
 	.if_streaming_non_iso = INITIALIZER_IF_STREAMING_NON_ISO,	\
 	.if_streaming = INITIALIZER_IF_STREAMING,			\
 	.streaming_desc = {						\
 		.iface = INITIALIZER_IFS_AS_IFACE(1),			\
-		.format = INITIALIZER_IFS_FORMAT_III(x),		\
+		.format = INITIALIZER_IFS_FORMAT_III(name),		\
 		.ep = INITIALIZER_IFS_AS_ENDPOINT			\
 	},								\
 	.if_streaming_ep = INITIALIZER_IF_EP(stream_ep_addr,		\
@@ -94,12 +96,11 @@ static sys_slist_t usb_audio_data_devlist;
 		.usb_device_description = NULL,				\
 		.interface_config = audio_interface_config,		\
 		.interface_descriptor = &usb_audio_desc_##x.if_control,	\
-		.cb_usb_status_composite =				\
-				audio_status_composite_cb,		\
+		.cb_usb_status = audio_cb_usb_status,                   \
 		.interface = {						\
 			.class_handler = audio_class_handle_req,	\
 			.custom_handler = NULL,				\
-			.payload_data = NULL,				\
+			.vendor_handler = NULL, \
 		},							\
 		.num_endpoints = ARRAY_SIZE(usb_audio_ep_data_##x),	\
 		.endpoint = usb_audio_ep_data_##x,			\
@@ -141,10 +142,11 @@ static void audio_interface_config(struct usb_desc_header *head,
 	//loopback_cfg.if0.bInterfaceNumber = bInterfaceNumber;
 }
 
-static void audio_status_composite_cb(struct usb_cfg_data *cfg,
-					    enum usb_dc_status_code status,
-					    const u8_t *param)
+void audio_cb_usb_status(struct usb_cfg_data *cfg,
+			      enum usb_dc_status_code cb_status,
+			      const u8_t *param)
 {
+	LOG_WRN("CB %08x", (int)cb_status);
 }
 
 
@@ -160,53 +162,44 @@ static void audio_status_composite_cb(struct usb_cfg_data *cfg,
 int audio_class_handle_req(struct usb_setup_packet *pSetup,
 			   s32_t *len, u8_t **data)
 {
+	uint32_t wIndex;
 	LOG_WRN("Req %d",(u32_t)pSetup->bRequest);
-	/*
-	struct audio_dev_data_t *dev_data;
+
+	struct usb_audio_dev_data_t *dev_data;
 	struct usb_dev_data *common;
 
-	common = usb_get_dev_data_by_iface(&cdc_acm_data_devlist,
-					   sys_le16_to_cpu(pSetup->wIndex));
+	LOG_DBG("Called audio class handle req");
+
+	wIndex = sys_le16_to_cpu(pSetup->wIndex) & 0xFF;
+	common = usb_get_dev_data_by_iface(&usb_audio_data_devlist,
+			wIndex);
 	if (common == NULL) {
-		LOG_WRN("Device data not found for interface %u",
-			sys_le16_to_cpu(pSetup->wIndex));
+		LOG_DBG("Device data not found for interface %u", wIndex);
 		return -ENODEV;
 	}
 
-	dev_data = CONTAINER_OF(common, struct cdc_acm_dev_data_t, common);
+	dev_data = CONTAINER_OF(common, struct usb_audio_dev_data_t, common);
 
-	switch (pSetup->bRequest) {
-	case SET_LINE_CODING:
-		memcpy(&dev_data->line_coding,
-		       *data, sizeof(dev_data->line_coding));
-		LOG_DBG("CDC_SET_LINE_CODING %d %d %d %d",
-			sys_le32_to_cpu(dev_data->line_coding.dwDTERate),
-			dev_data->line_coding.bCharFormat,
-			dev_data->line_coding.bParityType,
-			dev_data->line_coding.bDataBits);
+	switch (pSetup->bRequest)
+	{
+	case 0x81:
+		dev_data->mixerCurrent = 1;
+		*data = &(dev_data->mixerCurrent);
+		*len = 1;
+		LOG_WRN("GET_CUR");
 		break;
 
-	case SET_CONTROL_LINE_STATE:
-		dev_data->line_state = (u8_t)sys_le16_to_cpu(pSetup->wValue);
-		LOG_DBG("CDC_SET_CONTROL_LINE_STATE 0x%x",
-			dev_data->line_state);
-		break;
-
-	case GET_LINE_CODING:
-		*data = (u8_t *)(&dev_data->line_coding);
-		*len = sizeof(dev_data->line_coding);
-		LOG_DBG("CDC_GET_LINE_CODING %d %d %d %d",
-			sys_le32_to_cpu(dev_data->line_coding.dwDTERate),
-			dev_data->line_coding.bCharFormat,
-			dev_data->line_coding.bParityType,
-			dev_data->line_coding.bDataBits);
+	case 0x1:
+		*data = &(dev_data->mixerCurrent);
+		*len = 1;
+		LOG_WRN("SET_CUR");
 		break;
 
 	default:
-		LOG_DBG("CDC ACM request 0x%x, value 0x%x",
-			pSetup->bRequest, pSetup->wValue);
+		LOG_DBG("Audio request 0x%x, value 0x%x",
+				pSetup->bRequest, pSetup->wValue);
 		return -EINVAL;
-	}*/
+	}
 
 	return 0;
 }
@@ -216,7 +209,7 @@ int audio_class_handle_req(struct usb_setup_packet *pSetup,
 
 static void usb_audio_ep_cb(u8_t ep, enum usb_dc_ep_cb_status_code ep_status)
 {
-
+	LOG_ERR("*");
 }
 
 
@@ -236,22 +229,15 @@ static int usb_audio_device_init(struct device *dev)
 	sys_slist_append(&usb_audio_data_devlist, &dev_data->common.node);
 
 
-
-
-	struct usb_cfg_data *cfg = (void *)dev->config->config_info;
-
-	cfg->interface.payload_data = dev_data->interface_data;
-	cfg->usb_device_description = usb_get_device_descriptor();
-
 	/* Initialize the USB driver with the right configuration */
-	ret = usb_set_config(cfg);
+	ret = usb_set_config(usb_get_device_descriptor());
 	if (ret < 0) {
 		LOG_ERR("Failed to config USB");
 		return ret;
 	}
 
 	/* Enable USB driver */
-	ret = usb_enable(cfg);
+	ret = usb_enable();
 	if (ret < 0) {
 		LOG_ERR("Failed to enable USB");
 		return ret;
@@ -270,8 +256,8 @@ static int usb_audio_device_init(struct device *dev)
 			    CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,	\
 			    &usb_audio_api)
 
-DEFINE_AUDIO_EP(0,0x00);
-DEFINE_AUDIO_HEADPHONES_DESCR(0,0x00);
+DEFINE_AUDIO_EP(0,0x8);
+DEFINE_AUDIO_HEADPHONES_DESCR(0,0x8);
 DEFINE_AUDIO_CFG_DATA(0);
 DEFINE_AUDIO_DEV_DATA(0);
 DEFINE_AUDIO_DEVICE(0);
