@@ -342,6 +342,7 @@ static struct nrf_usbd_ep_ctx *endpoint_ctx(const u8_t ep)
 	u8_t ep_num;
 
 	if (!ep_is_valid(ep)) {
+		LOG_ERR("EP invalid");
 		return NULL;
 	}
 
@@ -364,6 +365,7 @@ static struct nrf_usbd_ep_ctx *endpoint_ctx(const u8_t ep)
 		}
 	}
 
+	LOG_ERR("EP not found");
 	return NULL;
 }
 
@@ -1129,7 +1131,10 @@ static void usbd_event_handler(nrfx_usbd_evt_t const *const p_event)
 	bool put_evt = false;
 
 	brtLogAdd(0xF00000 | p_event->type);
-
+	if (p_event->type != NRFX_USBD_EVT_SOF)
+	{
+		LOG_ERR(">>> event %d", (int)p_event->type);
+	}
 	switch (p_event->type) {
 	case NRFX_USBD_EVT_SUSPEND:
 		LOG_DBG("SUSPEND state detected");
