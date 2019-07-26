@@ -240,9 +240,42 @@ struct audio_as_format_type_iii_desc_##name {		\
 }
 
 
+/*
+ * 0 bLength 1 0x0C Size of this descriptor in bytes
+1 bDescriptorType 1 0x24 Class specific INTERFACE descriptor
+2 bDescriptorSubtype 1 0x02 INPUT_TERMINAL descriptor subtype
+3 bTerminalID 1 0x04 Unique ID of this terminal set to 4
+4 wTerminalType 2 0x0201 Terminal type is Microphone device
+6 bAssocTerminal 1 0x00 No Output Terminal to which this Input Terminal is
+associated
+7 bNrChannels 1 0x01 Number of logical output channels in the Terminal’s output
+audio channel cluster
+8 wChannelConfig 2 0x0004 Bitmap location of the logical channels
+10 iChannelNames 1 0x00 No non-predefined logical channels, the index is set to 0
+11 iTerminal 1 0x00 No string descriptors for this Input Terminal
+ */
 
 
 
+
+/* Table 5-8. Microphone - Input Terminal Descriptor */
+#define MIC_INITIALIZER_IFC_INPUT_TERMINAL(terminal_id) \
+		{  \
+			.bLength = sizeof(struct audio_input_terminal_desc), \
+			.bDescriptorType = USB_CS_INTERFACE_DESC, \
+			.bDescriptorSubType = AUDIO_CS_INPUT_TERMINAL, \
+			.bTerminalID = terminal_id, \
+			.wTerminalType = sys_cpu_to_le16(0x0201), \
+			.bAssocTerminal = 0, \
+			.bNrChannels = 2, \
+			.wChannelConfig = sys_cpu_to_le16(0x0004), /* baso: nie wiem */ \
+			.iChannelNames = 0, \
+			.iTerminal = 0, \
+		}
+
+
+
+/* Table 5-7. Headphone - Input Terminal Descriptor */
 //todo: terminaltype, n_channels, channelconfig
 #define INITIALIZER_IFC_INPUT_TERMINAL(terminal_id)		\
 	{								\
@@ -257,6 +290,8 @@ struct audio_as_format_type_iii_desc_##name {		\
 		.iChannelNames = 0,					\
 		.iTerminal = 0						\
 	}
+
+
 //todo: terminal type
 #define INITIALIZER_IFC_OUTPUT_TERMINAL(terminal_id, source_id)		\
 	{								\
@@ -270,6 +305,7 @@ struct audio_as_format_type_iii_desc_##name {		\
 		.iTerminal = 0						\
 	}
 
+/* Table 5-9. Mixer - Feature Unit Descriptor  */
 #define INITIALIZER_IFC_FEATURE_UNIT(name, unit_id, source_id)		\
 	{								\
 		.bLength = sizeof(struct audio_feature_unit_desc_##name),\
@@ -283,6 +319,7 @@ struct audio_as_format_type_iii_desc_##name {		\
 	}
 
 
+/* Table 5-5. Class Specific AudioControl Interface Descriptor */
 //TODO: parameter for size
 #define INITIALIZER_IFC_HEADER(name)				\
 	{								\
@@ -291,7 +328,7 @@ struct audio_as_format_type_iii_desc_##name {		\
 		.bDescriptorSubType = AUDIO_CS_HEADER,			\
 		.bcdADC = sys_cpu_to_le16(0x0100),			\
 		.wTotalLength = sys_cpu_to_le16(sizeof(struct usb_audio_config_control_##name)),		\
-		.bInCollection = 1,					\
+		.bInCollection = 1,					\ /* baso: tu ilosc interfejsow IN */
 		.baInterfaceNr = {1}	\
 	}
 
@@ -311,6 +348,7 @@ struct audio_as_format_type_iii_desc_##name {		\
 		.bInterval = interval,					\
 	}
 
+/* Standard Audio Control Interface Descriptor */
 #define INITIALIZER_IF_CONTROL						\
 	{								\
 		.bLength = sizeof(struct usb_if_descriptor),		\
