@@ -1500,7 +1500,11 @@ static int class_handler(struct usb_setup_packet *pSetup,
 		if ((iface->class_handler) &&
 		    (if_descr->bInterfaceNumber ==
 		     (sys_le16_to_cpu(pSetup->wIndex) & 0xFF))) {
-			LOG_DBG("Do actual call");
+			LOG_DBG("Do actual call as 0x%08x == 0x%08x", sys_le16_to_cpu(pSetup->wIndex), if_descr->bInterfaceNumber);
+			LOG_DBG("......... 0x%08x", sys_le16_to_cpu(pSetup->wValue));
+			brtLogAdd('A');
+			brtLogAdd(sys_le16_to_cpu(pSetup->wIndex));
+			brtLogAdd(if_descr->bInterfaceNumber);
 			return iface->class_handler(pSetup, len, data);
 		}
 		else
