@@ -91,7 +91,7 @@ static sys_slist_t usb_audio_data_devlist;
 	}
 
 #define DEFINE_AUDIO_CFG_DATA(x)					\
-	USBD_CFG_DATA_DEFINE(usb_audio)					\
+	USBD_CFG_DATA_DEFINE(usb_audio, test)					\
 	struct usb_cfg_data usb_audio_config_##x = {			\
 		.usb_device_description = NULL,				\
 		.interface_config = audio_interface_config,		\

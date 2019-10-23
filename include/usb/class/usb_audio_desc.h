@@ -328,7 +328,7 @@ audio channel cluster
 		.bDescriptorSubType = AUDIO_CS_HEADER,			\
 		.bcdADC = sys_cpu_to_le16(0x0100),			\
 		.wTotalLength = sys_cpu_to_le16(sizeof(struct usb_audio_config_control_##name)),		\
-		.bInCollection = 1,					\ /* baso: tu ilosc interfejsow IN */
+		.bInCollection = 1,					/* baso: tu ilosc interfejsow IN */ \
 		.baInterfaceNr = {1}	\
 	}
 
